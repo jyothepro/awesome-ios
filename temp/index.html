@@ -148,6 +148,7 @@
         let maxSpeed = 0;
         let totalDistance = 0;
         let lastPosition = null;
+        let lastTimestamp = null;
         let currentSpeed = 0;
 
         const canvas = document.getElementById('gauge');
@@ -220,9 +221,20 @@
 
             watchId = navigator.geolocation.watchPosition(
                 (position) => {
+                    const now = Date.now();
                     const speed = position.coords.speed;
-                    if (speed !== null && speed >= 0) {
-                        currentSpeed = Math.round(speed * 3.6); // m/s to km/h
+
+                    if (speed !== null && speed > 0) {
+                        currentSpeed = Math.round(speed * 3.6);
+                    } else if (lastPosition && lastTimestamp) {
+                        const dist = haversine(
+                            lastPosition.coords.latitude, lastPosition.coords.longitude,
+                            position.coords.latitude, position.coords.longitude
+                        );
+                        const timeSec = (now - lastTimestamp) / 1000;
+                        if (timeSec > 0 && dist > 2) {
+                            currentSpeed = Math.round((dist / timeSec) * 3.6);
+                        }
                     }
 
                     if (lastPosition && position.coords.latitude) {
@@ -230,9 +242,10 @@
                             lastPosition.coords.latitude, lastPosition.coords.longitude,
                             position.coords.latitude, position.coords.longitude
                         );
-                        totalDistance += dist;
+                        if (dist > 2) totalDistance += dist;
                     }
                     lastPosition = position;
+                    lastTimestamp = now;
 
                     if (currentSpeed > 0) speeds.push(currentSpeed);
                     if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
@@ -262,6 +275,7 @@
             maxSpeed = 0;
             totalDistance = 0;
             lastPosition = null;
+            lastTimestamp = null;
             currentSpeed = 0;
             updateDisplay();
             setStatus('Ready to measure', 'ready');
