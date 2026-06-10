@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Train Speed Test Meter</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+        }
+        h1 {
+            margin-bottom: 10px;
+            font-size: 1.8rem;
+            text-align: center;
+        }
+        .subtitle {
+            color: #aaa;
+            margin-bottom: 30px;
+            font-size: 0.9rem;
+        }
+        .speedometer {
+            position: relative;
+            width: 300px;
+            height: 180px;
+            margin-bottom: 30px;
+        }
+        .speed-display {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .speed-value {
+            font-size: 4rem;
+            font-weight: bold;
+            color: #00d4ff;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+        }
+        .speed-unit { font-size: 1.2rem; color: #888; }
+        .gauge-container {
+            width: 320px;
+            height: 160px;
+            position: relative;
+            margin: 0 auto 30px;
+        }
+        canvas { display: block; margin: 0 auto; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            max-width: 400px;
+            width: 100%;
+            padding: 0 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 15px 10px;
+            text-align: center;
+        }
+        .stat-label { font-size: 0.7rem; color: #888; text-transform: uppercase; }
+        .stat-value { font-size: 1.3rem; font-weight: bold; margin-top: 5px; }
+        .controls {
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover { transform: scale(1.05); }
+        .btn-start {
+            background: linear-gradient(135deg, #00d4ff, #0090ff);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(0, 212, 255, 0.4);
+        }
+        .btn-stop {
+            background: linear-gradient(135deg, #ff4757, #ff6b81);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(255, 71, 87, 0.4);
+        }
+        .btn-reset {
+            background: rgba(255,255,255,0.1);
+            color: #fff;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        .status {
+            margin-top: 20px;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+        .status.active { background: rgba(0, 212, 255, 0.15); color: #00d4ff; }
+        .status.stopped { background: rgba(255, 71, 87, 0.15); color: #ff4757; }
+        .status.ready { background: rgba(255,255,255,0.05); color: #888; }
+    </style>
+</head>
+<body>
+    <h1>Train Speed Test Meter</h1>
+    <p class="subtitle">GPS-based travel speed measurement</p>
+
+    <canvas id="gauge" width="320" height="180"></canvas>
+
+    <div class="speed-display">
+        <span class="speed-value" id="currentSpeed">0</span>
+        <span class="speed-unit">km/h</span>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-label">Max Speed</div>
+            <div class="stat-value" id="maxSpeed">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Avg Speed</div>
+            <div class="stat-value" id="avgSpeed">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Distance</div>
+            <div class="stat-value" id="distance">0 m</div>
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="btn-start" id="startBtn" onclick="startTracking()">Start</button>
+        <button class="btn-stop" id="stopBtn" onclick="stopTracking()" style="display:none">Stop</button>
+        <button class="btn-reset" onclick="resetStats()">Reset</button>
+    </div>
+
+    <div class="status ready" id="status">Ready to measure</div>
+
+    <script>
+        let watchId = null;
+        let speeds = [];
+        let maxSpeed = 0;
+        let totalDistance = 0;
+        let lastPosition = null;
+        let currentSpeed = 0;
+
+        const canvas = document.getElementById('gauge');
+        const ctx = canvas.getContext('2d');
+
+        function drawGauge(speed) {
+            const maxGauge = 350;
+            const ratio = Math.min(speed / maxGauge, 1);
+            const startAngle = Math.PI * 0.8;
+            const endAngle = Math.PI * 2.2;
+            const currentAngle = startAngle + (endAngle - startAngle) * ratio;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Background arc
+            ctx.beginPath();
+            ctx.arc(160, 160, 120, startAngle, endAngle);
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 20;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Speed arc
+            if (speed > 0) {
+                const gradient = ctx.createLinearGradient(0, 0, 320, 0);
+                gradient.addColorStop(0, '#00d4ff');
+                gradient.addColorStop(0.5, '#00ff88');
+                gradient.addColorStop(1, '#ff4757');
+                ctx.beginPath();
+                ctx.arc(160, 160, 120, startAngle, currentAngle);
+                ctx.strokeStyle = gradient;
+                ctx.lineWidth = 20;
+                ctx.lineCap = 'round';
+                ctx.stroke();
+            }
+
+            // Tick marks
+            for (let i = 0; i <= 7; i++) {
+                const angle = startAngle + (endAngle - startAngle) * (i / 7);
+                const x1 = 160 + Math.cos(angle) * 100;
+                const y1 = 160 + Math.sin(angle) * 100;
+                const x2 = 160 + Math.cos(angle) * 108;
+                const y2 = 160 + Math.sin(angle) * 108;
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                const label = Math.round(maxGauge * i / 7);
+                const lx = 160 + Math.cos(angle) * 88;
+                const ly = 160 + Math.sin(angle) * 88;
+                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, lx, ly);
+            }
+        }
+
+        function startTracking() {
+            if (!navigator.geolocation) {
+                setStatus('Geolocation not supported', 'stopped');
+                return;
+            }
+
+            document.getElementById('startBtn').style.display = 'none';
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            setStatus('Tracking speed...', 'active');
+
+            watchId = navigator.geolocation.watchPosition(
+                (position) => {
+                    const speed = position.coords.speed;
+                    if (speed !== null && speed >= 0) {
+                        currentSpeed = Math.round(speed * 3.6); // m/s to km/h
+                    }
+
+                    if (lastPosition && position.coords.latitude) {
+                        const dist = haversine(
+                            lastPosition.coords.latitude, lastPosition.coords.longitude,
+                            position.coords.latitude, position.coords.longitude
+                        );
+                        totalDistance += dist;
+                    }
+                    lastPosition = position;
+
+                    if (currentSpeed > 0) speeds.push(currentSpeed);
+                    if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
+
+                    updateDisplay();
+                },
+                (error) => {
+                    setStatus('GPS error: ' + error.message, 'stopped');
+                },
+                { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 }
+            );
+        }
+
+        function stopTracking() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+            }
+            document.getElementById('startBtn').style.display = 'inline-block';
+            document.getElementById('stopBtn').style.display = 'none';
+            setStatus('Stopped', 'stopped');
+        }
+
+        function resetStats() {
+            stopTracking();
+            speeds = [];
+            maxSpeed = 0;
+            totalDistance = 0;
+            lastPosition = null;
+            currentSpeed = 0;
+            updateDisplay();
+            setStatus('Ready to measure', 'ready');
+        }
+
+        function updateDisplay() {
+            document.getElementById('currentSpeed').textContent = currentSpeed;
+            document.getElementById('maxSpeed').textContent = maxSpeed;
+            const avg = speeds.length > 0 ? Math.round(speeds.reduce((a, b) => a + b, 0) / speeds.length) : 0;
+            document.getElementById('avgSpeed').textContent = avg;
+
+            let distStr;
+            if (totalDistance >= 1000) {
+                distStr = (totalDistance / 1000).toFixed(1) + ' km';
+            } else {
+                distStr = Math.round(totalDistance) + ' m';
+            }
+            document.getElementById('distance').textContent = distStr;
+
+            drawGauge(currentSpeed);
+        }
+
+        function haversine(lat1, lon1, lat2, lon2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        function setStatus(text, type) {
+            const el = document.getElementById('status');
+            el.textContent = text;
+            el.className = 'status ' + type;
+        }
+
+        drawGauge(0);
+    </script>
+</body>
+</html>
